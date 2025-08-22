@@ -2,6 +2,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define CHUNK_ID_SIZE 4
+
+void read_chunk_id(char * buffer, FILE * fd)  {
+  fread(buffer, sizeof(char), 4, fd);
+  buffer[CHUNK_ID_SIZE+1] = '\0';
+}
+
 int main(int argc, char **argv) {
   char *file = argv[1];
   if (file == NULL) {
@@ -16,8 +23,7 @@ int main(int argc, char **argv) {
     exit(1);
   }
   char riff[5];
-  fread(riff, sizeof(char), 4, fd);
-  riff[4] = '\0';
+  read_chunk_id(riff, fd);
   if (strcmp(riff, "RIFF") != 0) {
     printf("This is not a valid WAV file or not a WAV file, RIFF tag is not "
            "there");
@@ -29,12 +35,10 @@ int main(int argc, char **argv) {
                    //  that we infact do shift 4 bytes (please roast me if this
                    //  is wrong)
   char wave[5];
-  fread(wave, sizeof(char), 4, fd);
-  wave[4] = '\0';
+  read_chunk_id(wave, fd);
   printf("%s\n", wave);
   char fmt[5];
-  fread(fmt, sizeof(char), 4, fd); // fails somehow, check this later
-  fmt[4] = '\0';
+  read_chunk_id(fmt, fd);
   if (strcmp(fmt, "fmt ") != 0) {
 
     printf("This seems to be kinda sus, not a valid fmt header");
@@ -90,4 +94,5 @@ int main(int argc, char **argv) {
   char meow[str_length + 1];
   fseek(fd, info_size, SEEK_CUR);
   printf("ID3 chunk, skipping for now");
+  fclose(fd);
 }
