@@ -4,9 +4,27 @@
 
 #define CHUNK_ID_SIZE 4
 
+typedef struct {
+  char * chunk_id;
+  int chunk_size;
+} WavChunk;
+
+WavChunk read_chunk(FILE * fd) {
+  char buffer[5];
+  fread(buffer, sizeof(char), 4, fd);
+  buffer[CHUNK_ID_SIZE] = '\0';
+  int size;
+  fread(&size,4,1,fd);
+  WavChunk wavChunk =  {
+    buffer, size,
+  };
+  return wavChunk;
+}
+
+
 void read_chunk_id(char * buffer, FILE * fd)  {
   fread(buffer, sizeof(char), 4, fd);
-  buffer[CHUNK_ID_SIZE+1] = '\0';
+  buffer[CHUNK_ID_SIZE] = '\0';
 }
 
 int main(int argc, char **argv) {
