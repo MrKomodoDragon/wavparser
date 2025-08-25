@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +9,15 @@ typedef struct {
   char id[CHUNK_ID_LEN + 1];
   int size;
 } WavChunk;
+
+typedef struct {
+  short audio_format;
+  short num_channels;
+  int sample_rate;
+  int byte_rate;
+  short block_align;
+  short bits_per_sample;
+} AudioFormat;
 
 void validate_string(char *str1, char *str2, char *message) {
   if (strcmp(str1, str2) != 0) {
@@ -43,19 +53,13 @@ int main(int argc, char **argv) {
     exit(1);
   }
   WavChunk riff = read_chunk(fd);
-  printf("%s\n", riff.id);
   validate_string(riff.id, "RIFF", "No valid RIFF tag, exiting");
   char wave[5];
   read_string(wave, fd);
-  printf("%s\n", wave);
-  char fmt[5];
-  read_string(fmt, fd);
-  if (strcmp(fmt, "fmt ") != 0) {
-    printf("This seems to be kinda sus, not a valid fmt header");
-    exit(1);
-  }
-  printf("%s\n", fmt);
-  fseek(fd, sizeof(char) * 4, SEEK_CUR);
+  validate_string(wave, "WAVE",
+                  "This is a RIFF file but not a WAV file, exiting");
+  WavChunk fmt = read_chunk(fd);
+  validate_string(fmt.id, "fmt ", "Not a valid fmt header, exiting");
   short audio_format;
   fread(&audio_format, sizeof(short), 1, fd);
   switch (audio_format) {
