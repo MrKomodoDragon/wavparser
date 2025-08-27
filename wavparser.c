@@ -1,3 +1,4 @@
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +12,12 @@ typedef struct {
 } WavChunk;
 
 typedef struct {
+  char id[CHUNK_ID_LEN + 1];
+  int size;
+  char info[];
+} InfoChunk;
+
+typedef struct {
   short audio_format;
   short num_channels;
   int sample_rate;
@@ -18,6 +25,12 @@ typedef struct {
   short block_align;
   short bits_per_sample;
 } AudioFormat;
+
+typedef enum {
+  DATA_CHUNK,
+  ID3_CHUNK,
+  LIST_INFO_CHUNK,
+} ChunkType;
 
 void validate_string(char *str1, char *str2, char *message) {
   if (strcmp(str1, str2) != 0) {
@@ -37,6 +50,30 @@ WavChunk read_chunk(FILE *fd) {
   wavChunk.id[CHUNK_ID_LEN] = '\0';
   fread(&wavChunk.size, sizeof(wavChunk.size), 1, fd);
   return wavChunk;
+}
+
+AudioFormat read_audio_format(FILE *fd) {
+  AudioFormat audioFormat = {0};
+  fread(&audioFormat.audio_format, sizeof(short), 1, fd);
+  fread(&audioFormat.num_channels, sizeof(short), 1, fd);
+  fread(&audioFormat.sample_rate, 4, 1, fd);
+  fread(&audioFormat.byte_rate, 4, 1, fd);
+  fread(&audioFormat.block_align, sizeof(short), 1, fd);
+  fread(&audioFormat.bits_per_sample, sizeof(short), 1, fd);
+  return audioFormat;
+}
+
+ChunkType get_chunk_type(WavChunk *chunk) {
+  char *string = chunk->id;
+  if (strcmp(string, "data") == 0) {
+    return DATA_CHUNK;
+  }
+  if (strcmp(string, "id3 ") == 0 || strcmp(string, "ID3 ") == 0) {
+    return ID3_CHUNK;
+  }
+  if (strcmp(string, "LIST") == 0) {
+    return LIST_INFO_CHUNK;
+  }
 }
 
 int main(int argc, char **argv) {
@@ -60,43 +97,31 @@ int main(int argc, char **argv) {
                   "This is a RIFF file but not a WAV file, exiting");
   WavChunk fmt = read_chunk(fd);
   validate_string(fmt.id, "fmt ", "Not a valid fmt header, exiting");
-  short audio_format;
-  fread(&audio_format, sizeof(short), 1, fd);
-  switch (audio_format) {
-  case 1:
-    printf("Is PCM wav file :3\n");
+  AudioFormat audioFmt = read_audio_format(fd);
+  printf("Audio format details:\n  Audio Format: %d\n  Bits per Sample: "
+         "%d\n  Sample Rate: %d Hz\n  Byte Rate: %d bytes/sec\n  Block Align: "
+         "%d\n  Number of channels: %d\n",
+         audioFmt.audio_format, audioFmt.bits_per_sample, audioFmt.sample_rate,
+         audioFmt.byte_rate, audioFmt.block_align, audioFmt.num_channels);
+  WavChunk unknownChunk = read_chunk(fd);
+  ChunkType type = get_chunk_type(&unknownChunk);
+  switch (type) {
+  case DATA_CHUNK:
+    printf("Data chunk found!!\n");
+    fseek(fd, unknownChunk.size, SEEK_CUR); // just skip over it for now;
     break;
-  default:
-    printf("Some form of compression has been applied");
+  case ID3_CHUNK:
+    printf("ID3 Chunk");
+    break;
+  case LIST_INFO_CHUNK:
+    printf("INFO CHUNK");
+    break;
   }
-  short num_channels;
-  fread(&num_channels, sizeof(short), 1, fd);
-  printf("The audio file has %hu channels\n", num_channels);
-  int sample_rate;
-  fread(&sample_rate, 4, 1, fd);
-  printf("The audio file has a sample rate of %d Hz\n", sample_rate);
-  fseek(fd, 4, SEEK_CUR); // Skip the byte rate, idk why you'd need this for
-  short block_align;
-  fread(&block_align, sizeof(short), 1, fd);
-  printf("BlockAlign is: %hu\n", block_align);
-  short bits_per_sample;
-  fread(&bits_per_sample, sizeof(short), 1, fd);
-  printf("The wav file has %hu bits per sample\n", bits_per_sample);
-  char chunk_name[5];
-  fread(chunk_name, sizeof(char), 4, fd);
-  chunk_name[4] = '\0';
-  printf("%s\n", chunk_name);
-  if (strcmp(chunk_name, "data") != 0) {
-    printf("Not a data chunk, TODO: parse info chunks");
-    exit(1);
-  }
-  int chunk_size;
-  fread(&chunk_size, 4, 1, fd);
-  printf("chunk_size is %d bytes\n", chunk_size);
   printf("The length in seconds of the audio files is: %d seconds\n",
-         (chunk_size * 8) / (bits_per_sample * sample_rate * num_channels));
-  fseek(fd, chunk_size, SEEK_CUR);
-  char info_chunk[5];
+         (unknownChunk.size * 8) /
+             (audioFmt.bits_per_sample * audioFmt.sample_rate *
+              audioFmt.num_channels));
+  /*char info_chunk[5];
   fread(info_chunk, sizeof(char), 4, fd);
   info_chunk[4] = '\0';
   printf("%s\n", info_chunk);
@@ -108,5 +133,5 @@ int main(int argc, char **argv) {
   char meow[str_length + 1];
   fseek(fd, info_size, SEEK_CUR);
   printf("ID3 chunk, skipping for now");
-  fclose(fd);
+  fclose(fd);*/
 }
