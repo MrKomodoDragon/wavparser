@@ -44,6 +44,14 @@ void read_string(char *buffer, FILE *fd) {
   buffer[CHUNK_ID_LEN] = '\0';
 }
 
+InfoChunk read_info_chunk(FILE *fd) {
+  InfoChunk infoChunk = {0};
+  read_string(infoChunk.id, fd);
+  fread(&infoChunk.size, 4, 1, fd);
+  fread(infoChunk.info, sizeof(char), infoChunk.size, fd);
+  infoChunk.info[infoChunk.size + 1] = '\0';
+  return infoChunk;
+}
 WavChunk read_chunk(FILE *fd) {
   WavChunk wavChunk = {0};
   fread(wavChunk.id, sizeof(char), CHUNK_ID_LEN, fd);
@@ -115,7 +123,25 @@ int main(int argc, char **argv) {
     break;
   case LIST_INFO_CHUNK:
     printf("INFO CHUNK");
+    fseek(fd, 4, SEEK_CUR); // just the INFO tag name, not important
+    InfoChunk chunk = read_info_chunk(fd);
+    printf("\nID: %s\nINFO: %s", chunk.id, chunk.info);
+  }
+  unknownChunk = read_chunk(fd);
+  type = get_chunk_type(&unknownChunk);
+  switch (type) {
+  case DATA_CHUNK:
+    printf("Data chunk found!!\n");
+    fseek(fd, unknownChunk.size, SEEK_CUR); // just skip over it for now;
     break;
+  case ID3_CHUNK:
+    printf("ID3 Chunk");
+    break;
+  case LIST_INFO_CHUNK:
+    printf("INFO CHUNK");
+    fseek(fd, 4, SEEK_CUR); // just the INFO tag name, not important
+    InfoChunk chunk = read_info_chunk(fd);
+    printf("\nID: %s\nINFO: %s\n", chunk.id, chunk.info);
   }
   printf("The length in seconds of the audio files is: %d seconds\n",
          (unknownChunk.size * 8) /
