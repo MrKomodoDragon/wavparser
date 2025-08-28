@@ -14,7 +14,7 @@ typedef struct {
 typedef struct {
   char id[CHUNK_ID_LEN + 1];
   int size;
-  char info[];
+  char info[100];
 } InfoChunk;
 
 typedef struct {
@@ -45,11 +45,17 @@ void read_string(char *buffer, FILE *fd) {
 }
 
 InfoChunk read_info_chunk(FILE *fd) {
+  printf("BEGINNING READ\n");
   InfoChunk infoChunk = {0};
+  printf("INITIIALISED STRUCT\n");
   read_string(infoChunk.id, fd);
+  printf("%s\n", infoChunk.id);
+  printf("READ ID\n");
   fread(&infoChunk.size, 4, 1, fd);
-  fread(infoChunk.info, sizeof(char), infoChunk.size, fd);
-  infoChunk.info[infoChunk.size + 1] = '\0';
+  printf("READ SIZE: %d\n", infoChunk.size);
+  fread(infoChunk.info, sizeof(char), infoChunk.size - 1, fd);
+  printf("READ INFO STRING\n");
+  printf("RETURNING\n");
   return infoChunk;
 }
 WavChunk read_chunk(FILE *fd) {
@@ -122,7 +128,7 @@ int main(int argc, char **argv) {
     printf("ID3 Chunk");
     break;
   case LIST_INFO_CHUNK:
-    printf("INFO CHUNK");
+    printf("INFO CHUNK\n");
     fseek(fd, 4, SEEK_CUR); // just the INFO tag name, not important
     InfoChunk chunk = read_info_chunk(fd);
     printf("\nID: %s\nINFO: %s", chunk.id, chunk.info);
@@ -138,15 +144,22 @@ int main(int argc, char **argv) {
     printf("ID3 Chunk");
     break;
   case LIST_INFO_CHUNK:
-    printf("INFO CHUNK");
-    fseek(fd, 4, SEEK_CUR); // just the INFO tag name, not important
-    InfoChunk chunk = read_info_chunk(fd);
-    printf("\nID: %s\nINFO: %s\n", chunk.id, chunk.info);
+    printf("INFO CHUNK\n");
+    fseek(fd, 4, SEEK_CUR);           // just the INFO tag name, not important
+    int size = unknownChunk.size - 4; // the list chunk has the size of the
+    int counter = 0;
+    while (counter < size) {
+      InfoChunk chunk = read_info_chunk(fd);
+      printf("%lu", sizeof(chunk));
+      printf("\nID: %s\nINFO: %s\n", chunk.id, chunk.info);
+      printf("FINISHED READ\n");
+      counter += chunk.size + 4 + 4;
+    }
   }
-  printf("The length in seconds of the audio files is: %d seconds\n",
-         (unknownChunk.size * 8) /
-             (audioFmt.bits_per_sample * audioFmt.sample_rate *
-              audioFmt.num_channels));
+  // printf("The length in seconds of the audio files is: %d seconds\n",
+  //        (unknownChunk.size * 8) /
+  //            (audioFmt.bits_per_sample * audioFmt.sample_rate *
+  //             audioFmt.num_channels));
   /*char info_chunk[5];
   fread(info_chunk, sizeof(char), 4, fd);
   info_chunk[4] = '\0';
