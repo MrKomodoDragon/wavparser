@@ -1,5 +1,6 @@
 #include <ctype.h>
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,17 +46,10 @@ void read_string(char *buffer, FILE *fd) {
 }
 
 InfoChunk read_info_chunk(FILE *fd) {
-  printf("BEGINNING READ\n");
   InfoChunk infoChunk = {0};
-  printf("INITIIALISED STRUCT\n");
   read_string(infoChunk.id, fd);
-  printf("%s\n", infoChunk.id);
-  printf("READ ID\n");
-  fread(&infoChunk.size, 4, 1, fd);
-  printf("READ SIZE: %d\n", infoChunk.size);
-  fread(infoChunk.info, sizeof(char), infoChunk.size - 1, fd);
-  printf("READ INFO STRING\n");
-  printf("RETURNING\n");
+  fread(&infoChunk.size, 1, 4, fd);
+  fread(infoChunk.info, sizeof(char), infoChunk.size, fd);
   return infoChunk;
 }
 WavChunk read_chunk(FILE *fd) {
@@ -128,10 +122,10 @@ int main(int argc, char **argv) {
     printf("ID3 Chunk");
     break;
   case LIST_INFO_CHUNK:
-    printf("INFO CHUNK\n");
+    printf("INFO CHUNK");
     fseek(fd, 4, SEEK_CUR); // just the INFO tag name, not important
     InfoChunk chunk = read_info_chunk(fd);
-    printf("\nID: %s\nINFO: %s", chunk.id, chunk.info);
+    printf("ID: %s\nINFO: %s", chunk.id, chunk.info);
   }
   unknownChunk = read_chunk(fd);
   type = get_chunk_type(&unknownChunk);
@@ -145,15 +139,24 @@ int main(int argc, char **argv) {
     break;
   case LIST_INFO_CHUNK:
     printf("INFO CHUNK\n");
-    fseek(fd, 4, SEEK_CUR);           // just the INFO tag name, not important
-    int size = unknownChunk.size - 4; // the list chunk has the size of the
-    int counter = 0;
-    while (counter < size) {
+    int bytes_read = 0;
+    fseek(fd, 4, SEEK_CUR); // just the INFO tag name, not important
+    bytes_read += 4;
+    while (bytes_read < unknownChunk.size) {
       InfoChunk chunk = read_info_chunk(fd);
-      printf("%lu", sizeof(chunk));
-      printf("\nID: %s\nINFO: %s\n", chunk.id, chunk.info);
-      printf("FINISHED READ\n");
-      counter += chunk.size + 4 + 4;
+      printf("ID: %s\nINFO: %s\n", chunk.id, chunk.info);
+      uint8_t byte;
+      int is_empty = 1;
+      fread(&byte, 1, 1, fd);
+      if (byte != 0) {
+        fseek(fd, -1, SEEK_CUR);
+        is_empty = 0;
+      }
+      if (is_empty) {
+        bytes_read += 4 + 4 + chunk.size + 1;
+      } else {
+        bytes_read += 4 + 4 + chunk.size;
+      }
     }
   }
   // printf("The length in seconds of the audio files is: %d seconds\n",
