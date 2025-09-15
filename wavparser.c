@@ -159,21 +159,5 @@ int main(int argc, char **argv) {
       }
     }
   }
-  // printf("The length in seconds of the audio files is: %d seconds\n",
-  //        (unknownChunk.size * 8) /
-  //            (audioFmt.bits_per_sample * audioFmt.sample_rate *
-  //             audioFmt.num_channels));
-  /*char info_chunk[5];
-  fread(info_chunk, sizeof(char), 4, fd);
-  info_chunk[4] = '\0';
-  printf("%s\n", info_chunk);
-  int info_size;
-  fread(&info_size, 4, 1, fd);
-  printf("Info chunk size is %d\n", info_size);
-  int str_length = info_size / sizeof(char);
-  printf("%d", str_length);
-  char meow[str_length + 1];
-  fseek(fd, info_size, SEEK_CUR);
-  printf("ID3 chunk, skipping for now");
-  fclose(fd);*/
+  fclose(fd);
 }
