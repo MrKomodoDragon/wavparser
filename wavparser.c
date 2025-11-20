@@ -1,3 +1,6 @@
+#include <unistd.h>
+#define MINIAUDIO_IMPLEMENTATION
+#include "miniaudio.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,12 +21,12 @@ int hash(HashMap *map, char *key) {
     initial ^= *key++;
     initial *= PRIME;
   }
-  return initial & (map->size - 1);
+  return initial % (map->size);
 }
 
 void insert(char *key, char *value, HashMap *hm) {
   int index = hash(hm, key);
-  printf("Index generated: %d\n", index);
+  //  printf("Index generated: %d\n", index);
   hm->values[index] = value;
 }
 
@@ -31,6 +34,7 @@ char *get(char *key, HashMap *hm) {
   int index = hash(hm, key);
   return hm->values[index];
 }
+
 typedef struct {
   char id[CHUNK_ID_LEN + 1];
   int size;
@@ -43,6 +47,7 @@ typedef struct {
 } InfoChunk;
 
 typedef struct {
+  int size;
   short audio_format;
   short num_channels;
   int sample_rate;
@@ -56,6 +61,23 @@ typedef enum {
   ID3_CHUNK,
   LIST_INFO_CHUNK,
 } ChunkType;
+
+ma_event shouldStop;
+ma_format format;
+
+void data_callback(ma_device *pDevice, void *pOutput, const void *pInput,
+                   ma_uint32 frameCount) {
+  ma_audio_buffer *pBuffer = pDevice->pUserData;
+  if (pBuffer == NULL) {
+    return;
+  }
+  int thing =
+      ma_audio_buffer_read_pcm_frames(pBuffer, pOutput, frameCount, MA_FALSE);
+  if (thing < frameCount) {
+    ma_event_signal(&shouldStop);
+  }
+  (void)pInput;
+}
 
 void validate_string(char *str1, char *str2, char *message) {
   if (strcmp(str1, str2) != 0) {
@@ -84,8 +106,9 @@ WavChunk read_chunk(FILE *fd) {
   return wavChunk;
 }
 
-AudioFormat read_audio_format(FILE *fd) {
+AudioFormat read_audio_format(FILE *fd, int size) {
   AudioFormat audioFormat = {0};
+  audioFormat.size = size;
   fread(&audioFormat.audio_format, sizeof(short), 1, fd);
   fread(&audioFormat.num_channels, sizeof(short), 1, fd);
   fread(&audioFormat.sample_rate, 4, 1, fd);
@@ -110,7 +133,9 @@ ChunkType get_chunk_type(WavChunk *chunk) {
 
 int main(int argc, char **argv) {
   HashMap hm = {};
-  hm.size = 500;
+  int16_t *data;
+  int data_size;
+  hm.size = 125;
   hm.values = malloc(sizeof(char *) * hm.size);
   // absolute cinema right here, yessir
   insert("AGES", "Rated", &hm);
@@ -220,22 +245,30 @@ int main(int argc, char **argv) {
                   "This is a RIFF file but not a WAV file, exiting");
   WavChunk fmt = read_chunk(fd);
   validate_string(fmt.id, "fmt ", "Not a valid fmt header, exiting");
-  AudioFormat audioFmt = read_audio_format(fd);
+  AudioFormat audioFmt = read_audio_format(fd, fmt.size);
   printf("Audio format details:\n  Audio Format: %d\n  Bits per Sample: "
-         "%d\n  Sample Rate: %d Hz\n  Byte Rate: %d bytes/sec\n  Block Align: "
+         "%d\n  Sample Rate: %d Hz\n  Byte Rate: %d bytes/sec\n  Bitrate: %.2f "
+         "Kbps\n "
+         " Block Align: "
          "%d\n  Number of channels: %d\n",
          audioFmt.audio_format, audioFmt.bits_per_sample, audioFmt.sample_rate,
-         audioFmt.byte_rate, audioFmt.block_align, audioFmt.num_channels);
+         audioFmt.byte_rate, ((double)audioFmt.byte_rate / 1000) * 8,
+         audioFmt.block_align, audioFmt.num_channels);
   WavChunk unknownChunk = read_chunk(fd);
   ChunkType type = get_chunk_type(&unknownChunk);
   switch (type) {
   case DATA_CHUNK:
     printf("Data chunk found!!\n");
-    fseek(fd, unknownChunk.size,
-          SEEK_CUR); // just skip over it for now;
+    printf("%d\n", unknownChunk.size);
+    data_size = unknownChunk.size;
+    int sample_count = unknownChunk.size * 8 / audioFmt.bits_per_sample;
+    data = malloc(unknownChunk.size);
+    int64_t things =
+        fread(data, audioFmt.bits_per_sample / 8, sample_count, fd);
     break;
   case ID3_CHUNK:
     printf("ID3 Chunk");
+    fseek(fd, unknownChunk.size, SEEK_CUR);
     break;
   case LIST_INFO_CHUNK:
     printf("INFO CHUNK");
@@ -249,8 +282,9 @@ int main(int argc, char **argv) {
   switch (type) {
   case DATA_CHUNK:
     printf("Data chunk found!!\n");
-    fseek(fd, unknownChunk.size,
-          SEEK_CUR); // just skip over it for now;
+    int64_t *data = malloc(audioFmt.bits_per_sample / 8 * unknownChunk.size);
+    fread(data, audioFmt.bits_per_sample / 8, unknownChunk.size, fd);
+    printf("%d", data[0]);
     break;
   case ID3_CHUNK:
     printf("ID3 Chunk");
@@ -263,7 +297,7 @@ int main(int argc, char **argv) {
     bytes_read += 4;
     while (bytes_read < unknownChunk.size) {
       InfoChunk chunk = read_info_chunk(fd);
-      printf("ID: %s\nINFO: %s\n", get(chunk.id, &hm), chunk.info);
+      // printf("ID: %s\nINFO: %s\n\n", get(chunk.id, &hm), chunk.info);
       uint8_t byte;
       int is_empty = 1;
       fread(&byte, 1, 1, fd);
@@ -278,5 +312,44 @@ int main(int argc, char **argv) {
       }
     }
   }
-  fclose(fd);
+  // Audio playblack
+
+  ma_result result;
+  ma_audio_buffer buff;
+  ma_audio_buffer_config buffConfig;
+  ma_device_config deviceConfig;
+  ma_device device;
+  switch (audioFmt.bits_per_sample) {
+  case 16:
+    format = ma_format_s16;
+    break;
+  case 24:
+    format = ma_format_s24;
+    break;
+  }
+  buffConfig = ma_audio_buffer_config_init(format, audioFmt.num_channels,
+                                           data_size / audioFmt.num_channels /
+                                               (audioFmt.bits_per_sample / 8),
+                                           data, NULL);
+  buffConfig.sampleRate = audioFmt.sample_rate;
+  if (ma_audio_buffer_init(&buffConfig, &buff) != MA_SUCCESS) {
+    return -1;
+  }
+  deviceConfig = ma_device_config_init(ma_device_type_playback);
+  deviceConfig.playback.format = format;
+  deviceConfig.playback.channels = audioFmt.num_channels;
+  deviceConfig.sampleRate = audioFmt.sample_rate;
+  deviceConfig.dataCallback = data_callback;
+  deviceConfig.pUserData = &buff;
+  ma_event_init(&shouldStop);
+  if (ma_device_init(NULL, &deviceConfig, &device) != MA_SUCCESS) {
+    return -1;
+  }
+  if (ma_device_start(&device) != MA_SUCCESS) {
+    return -1;
+  }
+  printf("Waiting for playback to complete");
+  ma_event_wait(&shouldStop);
+  ma_device_uninit(&device);
+  ma_audio_buffer_uninit(&buff);
 }
