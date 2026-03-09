@@ -7,33 +7,39 @@
 #include <string.h>
 
 #define CHUNK_ID_LEN 4
-typedef struct {
+
+typedef struct HashMap {
   size_t size;
-  char **values;
+  size_t cap;
+  void **buckets;
 } HashMap;
 
 const size_t BASE = 0x811c9dc5;
 
 const size_t PRIME = 0x01000193;
-int hash(HashMap *map, char *key) {
+
+size_t hash(HashMap *m, char *str) {
   size_t initial = BASE;
-  while (*key) {
-    initial ^= *key++;
+  while (*str) {
+    initial ^= *str++;
     initial *= PRIME;
   }
-  return initial % (map->size);
+  return initial & (m->cap - 1);
 }
 
-void insert(char *key, char *value, HashMap *hm) {
-  int index = hash(hm, key);
-  //  printf("Index generated: %d\n", index);
-  hm->values[index] = value;
+HashMap init(size_t cap) {
+  HashMap m = {0, cap};
+  m.buckets = malloc(sizeof(void *) * m.cap);
+  assert(m.buckets != NULL);
+  return m;
 }
 
-char *get(char *key, HashMap *hm) {
-  int index = hash(hm, key);
-  return hm->values[index];
+void insert(char *str, void *value, HashMap *m) {
+  m->size++;
+  m->buckets[hash(m, str)] = value;
 }
+
+void *get(HashMap *m, char *str) { return m->buckets[hash(m, str)]; }
 
 typedef struct {
   char id[CHUNK_ID_LEN + 1];
@@ -132,11 +138,9 @@ ChunkType get_chunk_type(WavChunk *chunk) {
 }
 
 int main(int argc, char **argv) {
-  HashMap hm = {};
+  HashMap hm = init(500);
   int16_t *data;
   int data_size;
-  hm.size = 125;
-  hm.values = malloc(sizeof(char *) * hm.size);
   // absolute cinema right here, yessir
   insert("AGES", "Rated", &hm);
   insert("CMNT", "Comment", &hm);
@@ -226,7 +230,7 @@ int main(int argc, char **argv) {
   insert("VMIN", "VegasVersionMinor", &hm);
   insert("YEAR", "Year", &hm);
   char *file = argv[1];
-  if (file == NULL) {
+  if (argc < 2) {
     printf("Please provide a wav file\n");
     exit(1);
   }
@@ -246,20 +250,18 @@ int main(int argc, char **argv) {
   WavChunk fmt = read_chunk(fd);
   validate_string(fmt.id, "fmt ", "Not a valid fmt header, exiting");
   AudioFormat audioFmt = read_audio_format(fd, fmt.size);
-  printf("Audio format details:\n  Audio Format: %d\n  Bits per Sample: "
+  /* printf("Audio format details:\n  Audio Format: %d\n  Bits per Sample: "
          "%d\n  Sample Rate: %d Hz\n  Byte Rate: %d bytes/sec\n  Bitrate: %.2f "
          "Kbps\n "
          " Block Align: "
          "%d\n  Number of channels: %d\n",
          audioFmt.audio_format, audioFmt.bits_per_sample, audioFmt.sample_rate,
          audioFmt.byte_rate, ((double)audioFmt.byte_rate / 1000) * 8,
-         audioFmt.block_align, audioFmt.num_channels);
+         audioFmt.block_align, audioFmt.num_channels); */
   WavChunk unknownChunk = read_chunk(fd);
   ChunkType type = get_chunk_type(&unknownChunk);
   switch (type) {
   case DATA_CHUNK:
-    printf("Data chunk found!!\n");
-    printf("%d\n", unknownChunk.size);
     data_size = unknownChunk.size;
     int sample_count = unknownChunk.size * 8 / audioFmt.bits_per_sample;
     data = malloc(unknownChunk.size);
@@ -297,7 +299,7 @@ int main(int argc, char **argv) {
     bytes_read += 4;
     while (bytes_read < unknownChunk.size) {
       InfoChunk chunk = read_info_chunk(fd);
-      // printf("ID: %s\nINFO: %s\n\n", get(chunk.id, &hm), chunk.info);
+      printf("%s: %s\n", get(&hm, chunk.id), chunk.info);
       uint8_t byte;
       int is_empty = 1;
       fread(&byte, 1, 1, fd);
@@ -312,7 +314,68 @@ int main(int argc, char **argv) {
       }
     }
   }
-  // Audio playblack
+  unknownChunk = read_chunk(fd);
+  type = get_chunk_type(&unknownChunk);
+  switch (type) {
+  case DATA_CHUNK:
+    printf("Data chunk found!!\n");
+    int64_t *data = malloc(audioFmt.bits_per_sample / 8 * unknownChunk.size);
+    fread(data, audioFmt.bits_per_sample / 8, unknownChunk.size, fd);
+    printf("%d", data[0]);
+    break;
+  case ID3_CHUNK:
+    printf("ID3 Chunk\n");
+    int bytes_read = 0;
+    fseek(fd, 3, SEEK_CUR);
+    uint8_t major;
+    uint8_t minor;
+    fread(&major, 1, 1, fd);
+    fread(&minor, 1, 1, fd);
+    fseek(fd, 5, SEEK_CUR); // we deal with this later (by later I mean never)
+    bytes_read += 3 + 1 + 1 + 5; // look math is hard okay
+    printf("IDv3 version is 2.%d.%d\n", major, minor);
+    while (bytes_read < unknownChunk.size) {
+      // bro i just wanna talk with whoever decided idv3 was a good idea
+      char id[5];
+      read_string(id, fd);
+      fseek(fd, 3, SEEK_CUR);
+      uint8_t size;
+      fread(&size, 1, 1, fd);
+      char info[size - 2]; // size of 13 -> only 10, size must be 11
+      fseek(fd, 2, SEEK_CUR);
+      fread(info, 1, size - 2, fd);
+      info[size - 3] = '\0';
+      fseek(fd, 1, SEEK_CUR);
+      printf("%s %d %s", id, size, info);
+      bytes_read += 4 + 3 + 1 + size;
+    }
+    break;
+  case LIST_INFO_CHUNK:
+    printf("INFO CHUNK\n");
+    bytes_read = 0;
+    fseek(fd, 4,
+          SEEK_CUR); // just the INFO tag name, not important
+    bytes_read += 4;
+    while (bytes_read < unknownChunk.size) {
+      InfoChunk chunk = read_info_chunk(fd);
+      printf("%s: %s\n", get(&hm, chunk.id), chunk.info);
+      uint8_t byte;
+      int is_empty = 1;
+      fread(&byte, 1, 1, fd);
+      if (byte != 0) {
+        fseek(fd, -1, SEEK_CUR);
+        is_empty = 0;
+      }
+      if (is_empty) {
+        bytes_read += 4 + 4 + chunk.size + 1;
+      } else {
+        bytes_read += 4 + 4 + chunk.size;
+      }
+    }
+  }
+  printf("\n");
+  float duration = (float)data_size / audioFmt.byte_rate;
+  // Audio playback
 
   ma_result result;
   ma_audio_buffer buff;
@@ -341,14 +404,29 @@ int main(int argc, char **argv) {
   deviceConfig.sampleRate = audioFmt.sample_rate;
   deviceConfig.dataCallback = data_callback;
   deviceConfig.pUserData = &buff;
-  ma_event_init(&shouldStop);
   if (ma_device_init(NULL, &deviceConfig, &device) != MA_SUCCESS) {
     return -1;
   }
+  ma_event_init(&shouldStop);
+
   if (ma_device_start(&device) != MA_SUCCESS) {
     return -1;
   }
-  printf("Waiting for playback to complete");
+  int dur_seconds = (int)duration % 60;
+  int dur_minutes = duration / 60;
+  int dur_hours = dur_minutes / 60;
+  dur_minutes = dur_minutes % 60;
+  for (int i = 0; i <= (int)duration; i++) {
+    int seconds = i % 60;
+    int minutes = i / 60;
+    int hours = minutes / 60;
+    minutes = minutes % 60;
+    printf("%02d:%02d:%02d / %02d:%02d:%02d (%d%%)", hours, minutes, seconds,
+           dur_hours, dur_minutes, dur_seconds, (int)((i / duration) * 100));
+    fflush(stdout);
+    sleep(1);
+    printf("\33[2K\r");
+  }
   ma_event_wait(&shouldStop);
   ma_device_uninit(&device);
   ma_audio_buffer_uninit(&buff);
